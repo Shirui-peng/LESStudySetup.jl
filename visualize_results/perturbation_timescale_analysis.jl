@@ -8,6 +8,8 @@ dependence of the velocity perturbation,
     v_case(t) = v0 .+ ε .* (p .* t .+ q .* sin(t)),
 
 and solves for the first threshold-crossing time using only precomputed arrays.
+It also reports a simplified comparison timescale obtained by retaining only
+the linear `p * t` velocity component.
 =#
 
 include("visualize_STF_helpers.jl")
@@ -108,6 +110,45 @@ function first_velocity_threshold_crossing(v0, p, q, ε, threshold;
     return Inf
 end
 
+
+"""
+    first_linear_velocity_threshold_crossing(v0, p, ε, threshold)
+
+Return the threshold-crossing timescale obtained from the simplified linear
+model
+
+```julia
+v_linear(t) = v0 .+ ε .* p .* t
+```
+
+This is computed analytically for each grid point and returns the earliest
+positive boundary of `abs(v0 + ε * p * t) == threshold`, matching the boundary
+convention used by the bisection-based oscillatory calculation.
+"""
+function first_linear_velocity_threshold_crossing(v0, p, ε, threshold)
+    if maximum(abs, v0) > threshold
+        return 0.0
+    end
+
+    t_cross = Inf
+    for i in eachindex(v0, p)
+        slope = ε * p[i]
+        if slope == 0
+            continue
+        end
+
+        t1 = (-threshold - v0[i]) / slope
+        t2 = ( threshold - v0[i]) / slope
+        t_exit = max(t1, t2)
+
+        if t_exit >= 0
+            t_cross = min(t_cross, t_exit)
+        end
+    end
+
+    return t_cross
+end
+
 function recompute_timescale_fields(x, z, Ro)
     psi1_erf_orig = compute_psi1_field(x, z, Ro, B_funcs_erf)
     psi1_gauss_orig = compute_psi1_field(x, z, Ro, B_funcs_gauss)
@@ -157,7 +198,8 @@ end
 
 Recompute all Ro-dependent STF fields, build the eight requested perturbation
 cases, and print/return the 16 threshold-crossing rows for multipliers
-`1 + ε` and `1 + 10ε`.
+`1 + ε` and `1 + 10ε`. Each row includes `t`, the full oscillatory
+threshold time, and `t_linear`, the comparison time from `v0 + ε * p * t`.
 """
 function perturbation_timescale_analysis(; ε = 0.03, Ro = 1.0)
     ε = Float64(ε)
@@ -174,13 +216,16 @@ function perturbation_timescale_analysis(; ε = 0.03, Ro = 1.0)
     for case in cases
         v0, p, q = case.coefficients
         for threshold in thresholds
-            t_cross = first_velocity_threshold_crossing(v0, p, q, ε, threshold.factor * vmax0[case.profile])
+            threshold_value = threshold.factor * vmax0[case.profile]
+            t_cross = first_velocity_threshold_crossing(v0, p, q, ε, threshold_value)
+            t_linear = first_linear_velocity_threshold_crossing(v0, p, ε, threshold_value)
             row = (profile = case.profile,
                    perturbation = case.perturbation,
                    multiplier = threshold.multiplier,
                    ε = ε,
                    Ro = Ro,
-                   t = t_cross)
+                   t = t_cross,
+                   t_linear = t_linear)
             push!(rows, row)
             println(row)
         end
